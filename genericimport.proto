@@ -116,6 +116,8 @@ message InstanceData {
   repeated InstanceLabel labels = 11;
   repeated InstanceTagKeyValue key_value_tags = 12;
   InstanceType instance_type = 13;
+  repeated string control_ids = 14;  // IDs of controls to link to this instance (unique per integration)
+  ControlType control_type = 15; // required when control ids are specified
 }
 
 // SBOM Component for standalone software inventory
@@ -166,4 +168,57 @@ message Vulnerability {
   string scanner_name = 15; // Name/title from the scanner
   // Additional metadata
   string severity = 16; // Severity level (e.g., "critical", "high", "medium", "low")
+}
+
+enum ControlType {
+  CONTROL_TYPE_UNSPECIFIED = 0;
+  CONTROL_TYPE_EDR = 1;
+  CONTROL_TYPE_FIREWALL = 2;
+  CONTROL_TYPE_WAF = 3;
+  CONTROL_TYPE_CSPM = 4;
+  CONTROL_TYPE_ENDPOINT_MANAGEMENT = 5;
+  CONTROL_TYPE_ANTIVIRUS = 6;
+  CONTROL_TYPE_WAP = 7;
+  CONTROL_TYPE_DATA_ACCESS_GOVERNANCE = 8;
+  CONTROL_TYPE_IDS = 9;
+  CONTROL_TYPE_PRIVILEGE_MANAGEMENT = 10;
+  CONTROL_TYPE_VPN = 11;
+  CONTROL_TYPE_AUTHENTICATION = 12;
+  CONTROL_TYPE_ITDR = 13;
+  CONTROL_TYPE_EMAIL_SECURITY = 14;
+  CONTROL_TYPE_CNAPP = 15;
+  CONTROL_TYPE_OPERATING_SYSTEM = 16;
+}
+
+// Feature action enum for control feature configuration
+enum FeatureAction {
+  FEATURE_ACTION_UNSPECIFIED = 0;
+  FEATURE_ACTION_ALERT = 1;
+  FEATURE_ACTION_BLOCK = 2;
+  FEATURE_ACTION_ALLOW = 3;
+}
+
+// Control data for collection and linking to instances
+// Controls are upserted based on (tenant_id, integration_id, control_id) - the actual DB control name
+message ControlData {
+  string control_id = 1;        // Unique control identifier within this integration (required)
+  ControlType type = 2;         // Control type enum
+  string display_name = 3;      // Human-readable display name
+  string params = 4;            // Optional JSON params (max 64KB enforced)
+  repeated ControlFeatureData features = 5;  // Control features/settings
+}
+
+message ControlFeatureData {
+  string feature_name = 1;      // Unique feature identifier
+  string display_name = 2;      // Human-readable name
+  string description = 3;       // Feature description
+  ControlFeatureConfigData config = 4;  // Feature configuration
+  string feature_data = 5;      // Optional JSON-serialized feature type params (max 64KB enforced)
+  repeated string cves = 6;     // Associated CVEs
+}
+
+message ControlFeatureConfigData {
+  optional bool enabled = 1;    // For boolean type features
+  FeatureAction action = 2;     // For action-based features
+  string params = 3;            // Additional JSON params (max 64KB enforced)
 }
