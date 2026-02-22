@@ -125,6 +125,7 @@ message InstanceData {
 message SBOMComponent {
   Component component = 1;
   repeated string file_paths = 2;
+  map<string, string> dynamic_properties = 3; // Custom key-value metadata from the integration
 }
 
 // Vulnerability data structures
