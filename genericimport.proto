@@ -254,11 +254,27 @@ message ForwardingRuleData {
   map<string, string> properties = 5;     // Optional custom properties for the rule
 }
 
+// HttpErrorDetails holds structured HTTP error info that scripts can report.
+message HttpErrorDetails {
+  string error = 1;
+  int32 status_code = 2;
+  string url = 3;
+  string response_body = 4;
+}
+
 // TestAndSaveResponse holds the result of a starlark test_and_save call.
 message TestAndSaveResponse {
   bool ok = 1;
-  string error = 2;
-  int32 status_code = 3;
-  string url = 4;
-  string response_body = 5;
+  string error = 2 [deprecated = true];
+  int32 status_code = 3 [deprecated = true];
+  string url = 4 [deprecated = true];
+  string response_body = 5 [deprecated = true];
+  HttpErrorDetails error_details = 6;
+}
+
+// MainRunResponse holds the optional result of a starlark main() call.
+// Scripts can return this to report HTTP errors encountered during the run.
+message MainRunResponse {
+  bool ok = 1;
+  HttpErrorDetails error_details = 2;
 }
