@@ -119,6 +119,7 @@ message InstanceData {
   InstanceType instance_type = 13;
   repeated string control_ids = 14;  // IDs of controls to link to this instance (unique per integration)
   ControlType control_type = 15; // required when control ids are specified
+  string raw_response = 16; // Optional: raw HTTP response body returned by the API before parsing
 }
 
 // SBOM Component for standalone software inventory
@@ -171,6 +172,7 @@ message Vulnerability {
   // Additional metadata
   string severity = 16; // Severity level (e.g., "critical", "high", "medium", "low")
   map<string, string> dynamic_properties = 17; // Scanner-specific key-value metadata (e.g., detection score, result text)
+  string raw_response = 18; // Raw HTTP response body returned by the API before parsing
 }
 
 // Control type enum - matches db interfaces ControlType
@@ -252,6 +254,7 @@ message ForwardingRuleData {
   NetworkEntity destination = 3;          // Destination network entity (required)
   bool is_bidirectional = 4;              // Whether the rule applies in both directions
   map<string, string> properties = 5;     // Optional custom properties for the rule
+  string raw_response = 6; // Raw HTTP response body returned by the API before parsing
 }
 
 // HttpErrorDetails holds structured HTTP error info that scripts can report.
