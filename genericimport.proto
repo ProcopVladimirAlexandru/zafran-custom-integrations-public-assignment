@@ -121,6 +121,10 @@ message InstanceData {
   ControlType control_type = 15; // required when control ids are specified
   string raw_response = 16; // Optional: raw HTTP response body returned by the API before parsing
   string hostname = 17; // Optional: short hostname or FQDN. Used as an identifier for asset deduplication — prefer setting this to the most stable network identity of the instance (e.g. FQDN) when available.
+
+  // Per-instance runtime data — flows into NormalizedRawScan.Processes
+  // alongside the in_runtime synthetic processes built from vulnerabilities.
+  repeated Process processes = 18;
 }
 
 // SBOM Component for standalone software inventory
@@ -295,4 +299,85 @@ message TestAndSaveResponse {
 message MainRunResponse {
   bool ok = 1;
   HttpErrorDetails error_details = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Runtime info (per-instance) — mirrors the subset of
+// artifacts.NormalizedRawScan.Processes that downstream consumers actually
+// read (audited against instance_processor / risk_analyzer / asset_processor).
+// artifacts.Process fields not exposed here (Uptime, Namespaces, NetInfo,
+// FSPath, EngineSpecificData, LibData.Engine, LibData.Release,
+// NetConnection.{Domain,IsInbound,PortForwardInfo}) have no behavioural
+// reader — exposing them would only invite incorrect usage.
+//
+// Engine specifically is omitted because it's populated by Zafran's
+// agent-side scanners (Zazu/Wazu/Mazu) via process-memory introspection;
+// third-party API integrations have no way to set it correctly.
+// ---------------------------------------------------------------------------
+
+// SockScope: downstream filters restrict to SOCK_SCOPE_HOST. Leaving the
+// field unset means the connection won't surface as a host-scope socket.
+enum SockScope {
+  SOCK_SCOPE_UNSPECIFIED = 0;
+  SOCK_SCOPE_HOST = 1;
+  SOCK_SCOPE_NAMESPACE = 2;
+  SOCK_SCOPE_LOOPBACK = 3;
+}
+
+// ContainerSource: UNSPECIFIED maps to artifacts.NoContainer (process is
+// not containerised).
+enum ContainerSource {
+  CONTAINER_SOURCE_UNSPECIFIED = 0;
+  CONTAINER_SOURCE_DOCKER = 1;
+  CONTAINER_SOURCE_CONTAINERD = 2;
+}
+
+message Process {
+  string exe = 1;
+  string cmdline = 2;
+  MntInfo mnt_info = 3;
+  repeated LibData libs = 4;
+  repeated NetConnection net_conns = 5;
+}
+
+message LibData {
+  string path = 1;
+  string pkg = 2;
+  string version = 3;
+  repeated Component components = 4;
+}
+
+// NetConnection numeric fields use Linux syscall constants from
+// golang.org/x/sys/unix:
+//   protocol — IPPROTO_TCP=6, IPPROTO_UDP=17
+//   state    — BPF_TCP_ESTABLISHED=1, BPF_TCP_SYN_SENT=2, BPF_TCP_LISTEN=10, ...
+message NetConnection {
+  string source = 1;
+  SockScope scope = 2;
+  int32 protocol = 3;
+  int32 state = 4;
+  string local_ip = 5;
+  uint32 local_port = 6;   // proto3 has no uint16; the parser narrows to uint16.
+  string remote_ip = 7;
+  uint32 remote_port = 8;
+  // Namespace-scoped socket's host-side counterpart (recursive). risk_analyzer
+  // dereferences this to extract the host listening port for port-forwarded sockets.
+  NetConnection forwarded_host_port = 9;
+}
+
+message MntInfo {
+  string mnt_namespace_id = 1;
+  ContainerSource container_source = 2;
+  DockerInfo docker = 3;
+  ContainerdInfo containerd = 4;
+}
+
+message DockerInfo {
+  string image_id = 1;
+  string image_name = 2;
+}
+
+message ContainerdInfo {
+  string namespace = 1;
+  string image_name = 2;
 }
