@@ -228,6 +228,12 @@ message ControlData {
   string display_name = 3;      // Human-readable display name
   string params = 4;            // Optional JSON params (max 64KB enforced)
   repeated ControlFeatureData features = 5;  // Control features/settings
+  // Optional product override. When set, this control is registered under the given
+  // product id (e.g. "zscaler_zia", "zscaler_client_connector") instead of the
+  // integration's product id. Lets a single custom integration emit controls that
+  // map to multiple existing native products for display-name resolution and
+  // risk-rule binding. Defaults to the integration's product id when empty.
+  optional string product = 6;
 }
 
 message ControlFeatureData {
