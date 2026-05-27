@@ -3,15 +3,21 @@
 #
 # Structure:
 #   - main: Entry point that orchestrates the integration
-#   - get_bearer_token: (Optional) Gets a bearer token from OAuth endpoint
-#
-
+#   - parse_command_line_args: Parses and validates input parameters
+#   - get_bearer_token: Gets a bearer token from OAuth endpoint
+#   - revoke_bearer_token: Revokes a bearer token
+#   - fetch_instances: Fetches device instances from the API
+#   - fetch_vulnerabilities: Fetches vulnerability data from the API
+#   - get_url_with_params: Builds a URL with query parameters
+#   - parse_to_instance: Parses a device object to a zafran protobuf instance message
+#   - parse_to_finding: Parses a vulnerability object to a zafran protobuf vulnerability message
 
 load("http", "http")
 load("json", "json")
 load("log", "log")
 load("base64", "base64")
 load("zafran", "zafran")
+pb = zafran.proto_file
 
 
 OAUTH_TOKEN_ENDPOINT = "/oauth2/token"
@@ -20,9 +26,10 @@ COMBINED_DEVICES_ENDPOINT = "/devices/combined/devices/v1"
 COMBINED_VULNS_ENDPOINT = "/spotlight/combined/vulnerabilities/v1"
 MAX_DEVICES_PER_FLUSH = 50000
 MAX_VULNS_PER_FLUSH = 500000
+CVSS_VERSION = "3.1"
 
 
-def parse_params(kwargs):
+def parse_command_line_args(kwargs):
     """
     Parse and validate input parameters.
     
@@ -66,15 +73,15 @@ def main(**kwargs):
     """
 
     # Parse and validate parameters
-    parsed_params = parse_params(kwargs)    
-    if parsed_params == None:
-        log.error("Failed to parse parameters")
+    parsed_args = parse_command_line_args(kwargs)    
+    if parsed_args == None:
+        log.error("Failed to parse command line arguments")
         return -1
     
-    api_url = parsed_params["api_url"]
-    api_key = parsed_params["api_key"]
-    api_secret = parsed_params["api_secret"]
-    log.debug("Successfully parsed parameters")
+    api_url = parsed_args["api_url"]
+    api_key = parsed_args["api_key"]
+    api_secret = parsed_args["api_secret"]
+    log.debug("Successfully parsed command line arguments")
 
     log.info("Starting integration with API:", api_url)
 
@@ -86,19 +93,18 @@ def main(**kwargs):
     log.info("Successfully obtained bearer token")
 
     log.info("Fetching devices and vulnerabilities...")
-    pb = zafran.proto_file
     device_offset = None
     device_limit = 100
     devices_collected_since_flush = 0
     vulns_collected_since_flush = 0
     while True:
         device_response = fetch_instances(api_url=api_url, limit=device_limit, bearer_token=bearer_token, offset=device_offset)
-        if device_response == None:
+        if not device_response:
             log.error("Failed to fetch instances")
             return -1
 
         device_offset = device_response.get("next_offset", None)
-        log.debug("Current device offset: " + (device_offset[:10] if device_offset else "None"))
+        log.debug("Next device offset: " + (device_offset[:10] if device_offset else "None"))
         devices = device_response.get("resources", [])
         if not devices:
             break
@@ -115,6 +121,7 @@ def main(**kwargs):
                 log.debug("Will flush because of device limit")
                 zafran.flush()
                 devices_collected_since_flush = 0
+                vulns_collected_since_flush = 0
 
             vuln_offset = None
             vuln_limit = 1000
@@ -124,7 +131,7 @@ def main(**kwargs):
                     break
 
                 vuln_offset = vuln_response.get("next_offset", None)
-                log.debug("Current vulnerability offset: " + (vuln_offset[:10] if vuln_offset else "None"))
+                log.debug("Next vulnerability offset: " + (vuln_offset[:10] if vuln_offset else "None"))
                 vulnerabilities = vuln_response.get("resources", [])
                 if not vulnerabilities:
                     break
@@ -141,6 +148,7 @@ def main(**kwargs):
                         log.debug("Will flush because of vulnerability limit")
                         zafran.flush()
                         vulns_collected_since_flush = 0
+                        devices_collected_since_flush = 0
 
                 if vuln_offset == None:
                     break
@@ -149,6 +157,8 @@ def main(**kwargs):
             break
 
     zafran.flush()
+    devices_collected_since_flush = 0
+    vulns_collected_since_flush = 0
 
     log.info("Revoking bearer token...")
     revoke_result = revoke_bearer_token(api_url=api_url, client_id=api_key, client_secret=api_secret, bearer_token=bearer_token)
@@ -269,13 +279,14 @@ def fetch_instances(api_url, limit, bearer_token, offset = None, sort = "device_
         limit: Number of items per page for pagination
         bearer_token: Bearer token for authentication
         offset: Offset for pagination (optional)
+        sort: Sort order for pagination (optional)
 
     Returns:
         List of raw instance data
     """
     headers = {
         "Authorization": "Bearer " + bearer_token,
-        "Content-Type": "application/json"
+        "Accept": "application/json"
     }
 
     # Build request URL
@@ -290,7 +301,10 @@ def fetch_instances(api_url, limit, bearer_token, offset = None, sort = "device_
 
     # Make API request
     response = http.get(url, headers=headers)
-    
+    if not response:
+        log.error("Failed to fetch from combined devices API")
+        return None
+
     status_code = response.get("status_code", None)
     body = json.decode(response.get("body", None))
     if status_code != 200:
@@ -321,14 +335,14 @@ def fetch_vulnerabilities(api_url, device, limit, bearer_token, offset = None, s
         device: Device object
         limit: Number of items per page for pagination
         offset: Offset for pagination (optional)
-        sort: Sort order (optional)
+        sort: Sort order for pagination (optional)
         
     Returns:
         List of raw vulnerability data
     """
     headers = {
         "Authorization": "Bearer " + bearer_token,
-        "Content-Type": "application/json"
+        "Accept": "application/json"
     }
     # Build request URL
     params = [
@@ -346,7 +360,10 @@ def fetch_vulnerabilities(api_url, device, limit, bearer_token, offset = None, s
 
     # Make API request
     response = http.get(url, headers=headers)
-    
+    if not response:
+        log.error("Failed to fetch from combined vulnerabilites API")
+        return None
+
     status_code = response.get("status_code", None)
     body = json.decode(response.get("body", None))
 
@@ -382,7 +399,9 @@ def get_url_with_params(url, params):
     """
     if not params:
         return url
-    
+    if not url:
+        return url
+
     # Build query string
     query_parts = []
     for key, value in params:
@@ -414,8 +433,8 @@ def parse_to_instance(pb, raw_instance):
     # Extract fields from raw data
     hostname = raw_instance.get("hostname", "")
     os = raw_instance.get("os_build", "")
-    ip = raw_instance.get("external_ip", [])
-    mac = raw_instance.get("mac_address", [])
+    ip = raw_instance.get("external_ip", None)
+    mac = raw_instance.get("mac_address", None)
 
     instance_identifiers = []
     if "AWS_EC2" in raw_instance.get("service_provider", ""):
@@ -432,9 +451,11 @@ def parse_to_instance(pb, raw_instance):
         instance_type = pb.InstanceType.INSTANCE_TYPE_UNKNOWN
 
     labels = raw_instance.get("labels", [])
+    # I don't know how I am supposed to create a protobuf Timestamp object
+    # it is not in the example and what I tried did not work
     # last_seen = raw_instance.get("last_seen", None)
     # Create and return the InstanceData proto
-    instance = pb.InstanceData(
+    return pb.InstanceData(
         instance_id=instance_id,
         name=hostname,
         operating_system=os,
@@ -449,8 +470,6 @@ def parse_to_instance(pb, raw_instance):
         # source_last_seen=last_seen,
         instance_type=instance_type
     )
-
-    return instance
 
 
 def parse_to_finding(pb, raw_vuln):
@@ -523,7 +542,7 @@ def parse_to_finding(pb, raw_vuln):
         component=component,
         CVSS=[
             pb.CVSS(
-                version="3.1",
+                version=CVSS_VERSION,
                 vector=cve.get("vector", ""),
                 base_score=cve.get("base_score", ""),
                 source=data_provider,
